@@ -27,14 +27,14 @@ def prefilter_items(data_train, item_feat):
     # Уберем самые популярные (топ-3)
      
     popularity = popularity.sort_values('n_sold', ascending=False).reset_index()
-#     popularity = popularity.loc[popularity.department != 'GROCERY']
+    popularity = popularity.loc[popularity.department != 'COUPON/MISC ITEMS']
     
     # Уберем не интересные для рекоммендаций категории (department)
     
     
     
     
-    top_items = popularity[3:].item_id.tolist()
+    top_items = popularity.item_id.tolist()
     # Добавим, чтобы не потерять юзеров
     data_train.loc[~data_train['item_id'].isin(top_items), 'item_id'] = 999999 
 
