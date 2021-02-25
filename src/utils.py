@@ -1,40 +1,50 @@
-def prefilter_items(data_train, item_feat):
+import pandas as pd
+from scipy.sparse import csr_matrix
+
+def prefilter_items(data_train, item_feat, take_n_popular=5000):
     
     weeks_in_year = 52
     
     # Уберем товары, которые не продавались за последние 12 месяцев
-    data_train = data_train.loc[data_train['week_no'] <= weeks_in_year]
+    data_train_less_n_month = data_train.loc[data_train['week_no'] >= data_train['week_no'].max() - weeks_in_year]
     
-    popularity = data_train.groupby('item_id')[['quantity', 'sales_value']].sum().reset_index()
+    popularity = data_train_less_n_month.groupby('item_id')[['quantity', 'sales_value']].sum().reset_index()
     popularity.rename(columns={'quantity': 'n_sold', 'sales_value': 'price'}, inplace=True)
     popularity = popularity.loc[(popularity.n_sold > 0) & (popularity.price > 0)]
     popularity['new_sales_value'] = popularity.price / popularity.n_sold
     
-    popularity = popularity.merge(item_feat, on='item_id', how='left')
+    popularity = popularity.sort_values('new_sales_value', ascending=False).reset_index()
     
+    # Уберем слишком дорогие товар
+    
+    popularity = popularity.loc[3::]
+
     # Уберем слишком дешевые товары (на них не заработаем). 1 покупка из рассылок стоит 60 руб.
-    # Уберем слишком дорогие товары
-    price_quantile_70 = popularity.price.quantile(0.7)
-    price_quantile_99 = popularity.price.quantile(0.999)
     
-    popularity = popularity.loc[(popularity.price > price_quantile_70) & (popularity.price < price_quantile_99)]
-    
-    n_sold_quantile_70 = popularity.n_sold.quantile(0.7)
+    popularity = popularity.loc[popularity['new_sales_value'] > 1] 
     
     # Уберем самые непопулряные
-    popularity = popularity.loc[popularity['n_sold'] > n_sold_quantile_70]
+    popularity = popularity.loc[popularity['n_sold'] > 50]
     
     # Уберем самые популярные (топ-3)
      
     popularity = popularity.sort_values('n_sold', ascending=False).reset_index()
-    popularity = popularity.loc[popularity.department != 'COUPON/MISC ITEMS']
-    
+    popularity = popularity.loc[3::]
+   
     # Уберем не интересные для рекоммендаций категории (department)
+    small_count_departments = ['VIDEO RENTAL', 'AUTOMOTIVE', 'HOUSEWARES', 
+            'PORK', 'POSTAL CENTER', 'GM MERCH EXP', 'CNTRL/STORE SUP', 
+            'PROD-WHS SALES', 'DAIRY DELI', 'HBC', 'CHARITABLE', 'RX', 'TOYS',
+            'PHOTO', 'DELI/SNACK BAR', 'GRO BAKERY', 'PHARMACY SUPPLY', 
+            'ELECT &PLUMBING', 'MEAT-WHSE', 'VIDEO']
     
     
+    item_feat_ids = item_feat.loc[~item_feat['department'].isin(small_count_departments), 'item_id']
     
+    popularity = popularity.loc[popularity.item_id.isin(item_feat_ids), 'item_id'].tolist()
     
-    top_items = popularity.item_id.tolist()
+    top_items = popularity[:take_n_popular]
+    
     # Добавим, чтобы не потерять юзеров
     data_train.loc[~data_train['item_id'].isin(top_items), 'item_id'] = 999999 
 
@@ -83,23 +93,16 @@ def df_to_user_item_matrix(df):
 
     sparce_t_user_item = csr_matrix(user_item_matrix).T.tocsr()
 
-    return df_of_top, user_item_matrix, sparce_user_item, sparce_t_user_item
+    return user_item_matrix, sparce_user_item, sparce_t_user_item
 
-
-def group_df_train_and_test(train, test, groupby_feat, second_feat, rename_column, aggfuc):
-
-    if aggfuc == 'unique':
-
-        train_df = group_df_by(train, groupby_feat, second_feat, rename_column, aggfuc)
-        test_df = group_df_by(test, groupby_feat, second_feat, rename_column, aggfuc)
-
-    elif aggfuc == 'sum':
-
-        train_df = group_df_by(train, groupby_feat, second_feat, rename_column, aggfuc)
-        test_df = group_df_by(test, groupby_feat, second_feat, rename_column, aggfuc)
-
+def group_df_train_and_test(train, test, groupby_feat, second_feat, rename_column, aggfunc):
+    
+    assert aggfunc in ['unique', 'sum'], 'aggfunc принимает значения unique, sum'
+    
+    train_df = group_df_by(train, groupby_feat, second_feat, rename_column, aggfunc)
+    test_df = group_df_by(test, groupby_feat, second_feat, rename_column, aggfunc)
+        
     return train_df, test_df
-
 
 def change_ids(matrix):
     user_id = matrix.index.values
